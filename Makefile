@@ -31,6 +31,6 @@ flash:
 	avrdude -p$(PARTNUM) -c$(PROG_TYPE) -b$(BAUD) -U$(MEM_OP_FLASH) -F -P$(SERIAL_PORT)
 
 clean:
-	rm -rf *.o *.map, *.elf *.hex
+	rm -rf *.o *.map *.elf *.hex
 		
 			
