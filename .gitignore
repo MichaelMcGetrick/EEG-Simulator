@@ -1,0 +1,9 @@
+#Build files:
+main.o
+EEG-Simulator.elf
+EEG-Simulator.hex
+EEG-Simulator.map
+#Design Spreadsheets
+Timer0_Calcs.xls
+Timer1_Calcs.xls
+Data_Sampling.xls
