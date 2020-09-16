@@ -170,7 +170,7 @@ uint16_t readAnalogIn(uint8_t pin);
 
 //Data Processing:
 int8_t checkByte(int8_t byte, int8_t n);
-int16_t getVal(int8_t msb,int8_t lsb);
+uint16_t getVal(uint8_t msb,uint8_t lsb);
 
 
 //Diagnostics:
@@ -973,34 +973,15 @@ void readSimulation()
 }//readSimulation
 
 
-int16_t getVal(int8_t msb,int8_t lsb)
+uint16_t getVal(uint8_t msb,uint8_t lsb)
 {
 
-	int16_t val_msb,val_lsb;
-	val_msb = msb;
+	uint16_t val_msb = msb;
+    uint16_t val_lsb = lsb;
 	val_msb = val_msb << 8;
-
-
-
-	int i;
-	for(i=0;i<8;i++)  //Mask lower byte with 1
-	{
-		val_msb |= (1 << i);
-	}
-
-
-	val_lsb = lsb;
-
-
-	for(i=8;i<16;i++)  //Mask upper byte with 1
-	{
-		val_lsb |= (1 << i);
-	}
-
-
-	return  val_msb & val_lsb;
-
-
+   
+    return  val_msb | val_lsb;
+	
 
 }//getVal
 
