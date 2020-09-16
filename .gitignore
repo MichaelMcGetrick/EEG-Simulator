@@ -1,5 +1,6 @@
 #Build files:
 main.o
+UARTComms.o
 EEG-Simulator.elf
 EEG-Simulator.hex
 EEG-Simulator.map
