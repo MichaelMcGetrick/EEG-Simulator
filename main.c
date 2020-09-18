@@ -220,7 +220,7 @@ int main (void)
 	 ioinit(); //Setup IO pins and defaults
 
 	 bool baudtest = false;
-	 freq_response = false;
+	 freq_response = true;
 	 //Test for Baud rate ----------------------------------------------------
 	 if(baudtest)
 	 {
