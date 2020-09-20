@@ -22,8 +22,10 @@ SERIAL_PORT=/dev/ttyACM0
 #-j : only keep this section
 all:
 	$(CC) $(CFLAGS) -c -o UARTComms.o UARTComms.c
+	$(CC) $(CFLAGS) -c -o Timer0.o Timer0.c
+	$(CC) $(CFLAGS) -c -o Timer1.o Timer1.c
 	$(CC) $(CFLAGS) -c -o main.o main.c
-	$(CC) -Wl,-Map,$(TARGET).map -mmcu=$(MCU) -o $(TARGET).elf  UARTComms.o main.o -lm
+	$(CC) -Wl,-Map,$(TARGET).map -mmcu=$(MCU) -o $(TARGET).elf  UARTComms.o Timer0.o Timer1.o main.o -lm
 	$(OBJCOPY) -j .text -j .data -O ihex $(TARGET).elf $(TARGET).hex
 	$(AVRSIZE) --format=$(FORMAT) --mcu=$(MCU) $(TARGET).elf
 	

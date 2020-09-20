@@ -63,7 +63,7 @@
  *	SS			PB2					10
  *	MOSI		PB3					11
  *	MISO		PB4					12
- *	SCK			PB5					13
+ *	SCK		PB5					13
  *
  *
  *
@@ -83,18 +83,12 @@
 
 
 #include "UARTComms.h"
+#include "Timer0.h"		
+#include "Timer1.h"
 
 //DEFINES: ------------------------
 #define BLINK_DELAY_MS 100
 
-
-//TIMER - DATA SAMPLING
-//NB: If SAMPLE_RATE Set to 0, use SECS_PER_SAMPLE for Timer configuration
-//	 For 1 sample/sec, use SAMPLE_RATE = 0; SECS_PER_SAMPLE = 1
-#define FOSC 16000000
-#define SAMPLE_RATE			1000 //1000   //(samples per sec)
-#define SECS_PER_SAMPLE		1
-#define PRESCALER			8  //64  //1024: Sample rate = 0; Others: USe Timer1_Calcs.xls table
 //Sample buffer
 #define BYTES_PER_SAMPLE	2	//For MSB, LSB and control flags
 #define SAMPLE_BUF_LEN		500  //Data buffer to collect samples before UART transmission
@@ -130,31 +124,9 @@
 #define ARRAY_LEN	  3	//Array length for incoming data
 #define SPI_CTRL_CFG (RD_MODE << 7) | (INPUT_CHAN << 4)
 
-//FREQUENCY RESPONSE
-#define FREQ_RESP_PRESCALER	8
 
 
 //FUNCTION DECLARATIONS: --------------------------
-
-//Timer functions for data sampling (16 bit timer)
-void timer1_init(void);
-void start_timer1(void);
-void stop_timer1(void);
-
-//Timer functions for generating square wave signals
-//(8 bit timer)
-void timer0_init(void);
-void start_timer0(void);
-void stop_timer0(void);
-volatile uint32_t timer0_cnt, timer0_comp;
-//uint32_t CURR_FREQ;
-float CURR_FREQ;
-bool sig_level_high;
-bool freq_response;
-uint32_t fr_sampleRate, fr_secsPerSam;
-uint32_t fr_prescaler = 8;
-
-
 
 //SPI
 void SPI_MasterInit(void);
@@ -185,7 +157,6 @@ char cf_msb, cf_lsb;
 //SPI ATTRIBUTES:
 uint8_t SPI_MSB, SPI_LSB;
 uint8_t SPIData[ARRAY_LEN];
-//uint8_t dataBuf[BYTES_PER_SAMPLE*SAMPLE_BUF_LEN]; //Accommodate 4 bytes per sample
 int sampleCnt = 0;
 int byteCnt = 0;
 char data[5];
@@ -195,14 +166,12 @@ int32_t cnt;
 bool m_bSimulation	= false;
 char* AnaInpDev = "MPC3008"; //MPC3008;ADC PIN
 
-
-volatile bool sample = false;
-volatile bool chg_val = false;
-volatile int timer_cnt = 0;
+//Frequency response attributes:
+float CURR_FREQ;
+bool sig_level_high;
 
 //Time diagnostics
 long t_s, t;
-
 
 
 int main (void)
@@ -230,6 +199,7 @@ int main (void)
 	 //Do frequency response test---------------------------------------------
 	 	 if(freq_response)
 	 	 {
+	 		 _delay_ms(2000);
 	 		 freqResponse();
 
 	 	 }//if(baudtest)
@@ -259,21 +229,12 @@ int main (void)
 		 }
 
 
-
-		 //Initialise databuffer
-		 /*
-		 for(int i=0;i<SAMPLE_BUF_LEN;i++){
-			 dataBuf[i] = 0;
-		 }
-		 */
-
 		 // set pin 7 high to turn led on
 		 PORTD |= (1 << PORTD7);
 
 
 		 //Initialise timer:
-		 timer1_init();
-
+		 timer1_init(0.0); //Provide dummy signal frequency
 
 		 cnt = 0;
 
@@ -290,57 +251,19 @@ int main (void)
 			 }
 			 else
 			 {
-				 // set pin 7 high to turn led on
-				 //PORTD |= (1 << PORTD7);
-
+				 
 				 sample = false;
 				 stop_timer1();
 				 //printf("Have caught flag change\n");
 
 				 //Read value:
-
 				 SPI_ReadMPC3008();
-
-
-				 //dataBuf[sampleCnt] = getVal(SPI_MSB,SPI_LSB);
-				 //dataBuf[sampleCnt] = readAnalogIn(0);
 
 
 				 itoa(getVal(SPI_MSB,SPI_LSB),data,10);
 				 printf("%s\r",data); //Need /r for line feed for serial port program
 
-				 /*
-				 if(sampleCnt == SAMPLE_BUF_LEN -1)
-				 {
-					 sampleCnt = 0;
-					 byteCnt = 0;
-					 while(sampleCnt < SAMPLE_BUF_LEN)
-					 {
-
-
-						 //itoa(dataBuf[sampleCnt],data,10);
-						 //printf("%s\r",data); //Need /r for line feed for serial port program
-
-						 sampleCnt = sampleCnt + 1;
-					 }//while
-
-
-					 sampleCnt = 0;
-					 byteCnt = 0;
-					 //printf("Transmission completed!\n");
-					 break;
-
-
-				 }
-				 else
-				 {
-					 sampleCnt = sampleCnt + 1;
-					 //Start timer:
-					start_timer1();
-
-
-				 }
-				*/
+				 
 				 //Start timer:
 				start_timer1();
 
@@ -365,7 +288,7 @@ void simulation(void)
 
 
 	 //Initialise timer:
-	 timer1_init();
+	 timer1_init(0.0);  //Provide dummy frequency
 
 
 	 cnt = 0;
@@ -397,9 +320,6 @@ void simulation(void)
 			 SPI_MSB = checkByte(SPI_MSB,0);
 			 SPI_LSB = checkByte(SPI_LSB,1);
 
-			 //uint16_t volts =  getVal(SPI_MSB,SPI_LSB);
-			 //printf("cf_msb: %c cf_lsb: %c Voltage: %d\n", cf_msb,cf_lsb,volts);
-
 
 			 USART_Transmit(cf_msb);
 			 USART_Transmit(SPI_MSB);
@@ -422,281 +342,6 @@ void simulation(void)
 
 
 }//simulation
-
-
-
-
-//TIMER FUNCTIONS -----------------------------------------------
-void timer1_init()   //16 bit timer
-{
-
-	//Configure timer:
-	TCCR1B |= (1 << WGM12) ;  //CTC mode
-	//Set timer interrupt:
-	TIMSK1 |= (1 << OCIE1A);
-
-	//Define counter compare value:
-	uint32_t val;
-	if(!freq_response)   //Use in normal trace mode
-	{
-		if(SAMPLE_RATE == 0)
-		{
-			val = (uint32_t)FOSC/((uint32_t)PRESCALER);
-
-		}
-		else
-		{
-
-			val = (uint32_t)FOSC/((uint32_t)SAMPLE_RATE*(uint32_t)PRESCALER);
-
-		}
-	}
-	else		//Use in frequency response mode
-	{
-
-		uint32_t sample_rate = 100.0*CURR_FREQ;
-		fr_sampleRate = sample_rate;
-		if(sample_rate < 40 && sample_rate >= 4)
-		{
-			fr_prescaler = 64;
-			val = (uint32_t)FOSC/((uint32_t)sample_rate*(uint32_t)fr_prescaler);
-		}
-		if(sample_rate < 3)
-		{
-			fr_prescaler = 256;
-			val = (uint32_t)FOSC/((uint32_t)sample_rate*(uint32_t)fr_prescaler);
-		}
-		else
-		{
-			//Use default value
-			val = (uint32_t)FOSC/((uint32_t)sample_rate*(uint32_t)fr_prescaler);
-
-		}
-
-
-		if(sample_rate <= 1)
-		{
-			fr_sampleRate = 0;
-			float sps = 1.0/(float) sample_rate;
-			fr_secsPerSam = (int) sps;
-		}
-		//printf("val: %lu\n",val);
-
-
-	}
-
-
-	OCR1A = (uint16_t) val;
-
-
-
-
-
-
-	//printf("The CTC value is: %d\n",OCR1A);
-
-
-
-}//timer1_init
-
-
-void start_timer1()
-{
-
-	//Start the timer:
-	TCNT1= 0;
-
-	//Set the prescaler
-	if(!freq_response)
-	{
-		if(SAMPLE_RATE == 0)
-		{
-			TCCR1B |= (1 << CS12) | (1 << CS10) ;   //1024 pre-scale (slow timer clock down a bit)
-		}
-		else   //Set for SAMPLE_RATE > 1 Hz
-		{
-			if(PRESCALER == 1)
-			{
-				TCCR1B |= (1 << CS10) ;
-			}
-			if(PRESCALER == 8)
-			{
-				TCCR1B |= (1 << CS11);
-			}
-			if(PRESCALER == 64)
-			{
-				TCCR1B |= (1 << CS11) | (1 << CS10);
-			}
-			if(PRESCALER == 256)
-			{
-				TCCR1B |= (1 << CS12);
-			}
-			if(PRESCALER == 1024)
-			{
-				TCCR1B |= (1 << CS12) | (1 << CS10);
-			}
-
-		}
-	}
-	else   //Start timer in frequency response  mode
-	{
-		if(fr_prescaler == 8)
-		{
-			TCCR1B |= (1 << CS11);
-		}
-		if(fr_prescaler == 64)
-		{
-			TCCR1B |= (1 << CS11) | (1 << CS10);
-		}
-		if(fr_prescaler == 256)
-		{
-			TCCR1B |= (1 << CS12);
-		}
-
-
-	}
-}//start_timer1
-
-
-void stop_timer1()
-{
-	TCCR1B &= ~(1 << CS10);
-	TCCR1B &= ~(1 << CS11);
-	TCCR1B &= ~(1 << CS12);
-
-}
-//Handler for end of timer clock pulse period
-ISR(TIMER1_COMPA_vect)
-{
-	//printf("In interrupt\n");
-
-	if(!freq_response)
-	{
-		//Set flag to sample:
-		if(SAMPLE_RATE == 0)
-		{
-			timer_cnt = timer_cnt + 1;
-			if(timer_cnt == SECS_PER_SAMPLE)
-			{
-				timer_cnt = 0;
-				sample = true;
-			}
-
-		}
-		else
-		{
-			sample = true;
-		}
-	}
-	else   //Process for frequency response analysis
-	{
-		//Set flag to sample:
-		if(fr_sampleRate == 0)
-		{
-			timer_cnt = timer_cnt + 1;
-			if(timer_cnt == fr_secsPerSam)
-			{
-				timer_cnt = 0;
-				sample = true;
-			}
-
-		}
-		else
-		{
-			sample = true;
-		}
-
-	}
-
-}
-
-
-void timer0_init()  //8 bit timer
-{
-
-	//Configure timer:
-	//TCCR1B |= (1 << WGM12) ;  //CTC mode
-	TCCR0A |= (1 << WGM01) ;  //CTC mode
-
-	//Set timer interrupt:
-	TIMSK0 |= (1 << OCIE0A);
-
-	//Define counter compare value:
-	OCR0A = 250;   //Gives integral multiples for all frequencies required
-
-	timer0_cnt = 0;
-
-	long TIMER_CLK = FOSC/FREQ_RESP_PRESCALER;
-	timer0_comp = TIMER_CLK/2;
-	//timer0_comp = timer0_comp/CURR_FREQ;
-
-	float val = (float)timer0_comp/CURR_FREQ;
-    timer0_comp = (long) val;
-
-
-	//printf("time0_comp %lu\n",(long) timer0_comp);
-
-
-}//timer0_init
-
-
-void start_timer0()
-{
-
-	//Start the timer:
-	TCNT0= 0;
-
-	//Set the prescaler
-	if(FREQ_RESP_PRESCALER == 8)
-	{
-		TCCR0B |= (1 << CS01);
-	}
-	if(FREQ_RESP_PRESCALER == 64)
-	{
-		TCCR0B |= (1 << CS01);
-		TCCR0B |= (1 << CS00);
-	}
-	if(FREQ_RESP_PRESCALER == 256)
-	{
-		TCCR0B |= (1 << CS02);
-	}
-	if(FREQ_RESP_PRESCALER == 1024)
-	{
-		TCCR0B |= (1 << CS02);
-		TCCR0B |= (1 << CS00);
-	}
-
-
-}//start_timer0
-
-
-void stop_timer0()
-{
-	TCCR0B &= ~(1 << CS00);
-	TCCR0B &= ~(1 << CS01);
-	TCCR0B &= ~(1 << CS02);
-
-}//stop_timer0
-
-//Handler for end of timer clock pulse period
-ISR(TIMER0_COMPA_vect)
-{
-
-	timer0_cnt = timer0_cnt + OCR0A;
-	//printf("timer0_cnt: %d\n",timer0_cnt);
-
-	if(timer0_cnt == timer0_comp)
-	{
-		chg_val = true;
-
-	}
-
-}
-
-
-//END --TIMER FUNCTIONS ------------------------------------
-
-
 
 
 int8_t checkByte(int8_t byte, int8_t n)
@@ -839,9 +484,7 @@ void SPI_Transmit( int8_t data )
 	{
 		//Wait for sent data
 	}
-	//Switch off light to show we got here
-	//PORTD &= ~(1 << PORTD7);
-
+	
 
 }//SPI_Transmit
 
@@ -1037,12 +680,13 @@ void freqResponse(void)
 
 	//GENERATE FREQUENCY RESPONSE DATA -----------------------------------
 	// Instructions for use:
-	//   i) Use Arduino ADC Pin 0 for reading sample values
-	//  ii) Use Arduino digital pin 3 (PD3) for output of generated square wave
-	// iii) Use GND bias to remove voltage divider bias to input signal
-	//  iv) Define the time in seconds to keep generating a given signal
+	//	i) Use Arduino ADC Pin 0 for reading the ouput voltage for VRef   
+	// ii) Use Arduino ADC Pin 1 for reading sample values
+	//iii) Use Arduino digital pin 3 (PD3) for output of generated square wave
+	// iv) Use GND bias to remove voltage divider bias to input signal
+	//  v) Define the time in seconds to keep generating a given signal
 	//      (useful for inspecting with the DSO)
-	//   v) Sampling frequencies (only for use for range 0.01Hz - 10000Hz!):
+	// vi) Sampling frequencies (only for use for range 0.01Hz - 10000Hz!):
 	//		- For all signal frequencies sampling freq = 100*signal freq
 	//		- Use Prescaler 8 (this gives integral count values for 100-10000 sps)
 	//      - may need to use another for lower frequencies
@@ -1074,25 +718,33 @@ void freqResponse(void)
 
 
 	//Define test frequencies:
-	int NUM = 23;
+	/*		
+	int NUM_SAMPLES = 13;
 	float SIG_FREQS[] =
 	{
-		0.01,0.05,0.1,0.2,0.4,0.5,0.8,
-		1,2,4,5,8,10,
-		20,40,50,80,100,
-		200,400,500,800,1000
+		0.01, 0.05, 0.1, 0.2, 0.4, 0.5, 0.8,
+		1.0, 2.0, 4.0, 5.0, 8.0, 10.0
+		
 	};
+	*/
+	
+	int NUM_SAMPLES = 10;  
+	float SIG_FREQS[] =
+	{
+		20.0, 40.0, 50.0, 80.0, 100.0, 200.0,
+		400.0, 500.0, 800.0, 1000.0
+	};
+	
+		
+	char freqFmtStr[NUM_SAMPLES][10];
 
-	uint32_t Vavg[NUM];  //Average value of signal (averaging over all positive values)
-	uint32_t samCnt[NUM];  //Sample count for each signal
+	uint32_t Vavg[NUM_SAMPLES];  //Average value of signal (averaging over all positive values)
+	uint32_t samCnt[NUM_SAMPLES];  //Sample count for each signal
 
 
 	//Define time (in seconds) to generate each signal
 	uint32_t NUM_SECS = 1*30;
 
-
-
-	//printf("Setting up for frequency response auto-testing...\n");
 
 
 	//Set up output port for test signal (square wave)
@@ -1113,18 +765,20 @@ void freqResponse(void)
 	 PORTD &= ~(1 << PORTD3);
 	  //-------------------------------------------------------------------------
 
- 	 //NUM = 5; //temp
  	 //Send number of datasets, sample count and reference voltage
  	 char numStr[10],refStr[10];
- 	 sprintf(numStr,"%d",NUM);
+ 	 sprintf(numStr,"%d",NUM_SAMPLES);
  	 sprintf(refStr,"%d",(int) Vref);
+    
 
- 	 //Send vi UART:
+ 	 //Send via UART:
  	 printf("%s %s\r",numStr,refStr);
-
-
- 	 for(int i=0;i<NUM;i++)
+ 	 
+ 	 
+ 	 
+ 	 for(int i=0;i<NUM_SAMPLES;i++)
  	 {
+		 	 
  		 if(SIG_FREQS[i] == 0.01)   //Ensure we keep signal for entire cycle
  		 {
  			 NUM_SECS = 1*100;
@@ -1134,31 +788,44 @@ void freqResponse(void)
  		 {
  			 NUM_SECS = 1*30;
  		 }
+       
 
 		 //Start sampling:
 		  CURR_FREQ = SIG_FREQS[i]; //Initialise signal frequency
 		  Vavg[i] = 0.0;
-
 		  if(CURR_FREQ >= 1.0)
 		  {
-			  printf("Testing signal frequency %d Hz .......\r",(int)CURR_FREQ);
+			  float num = CURR_FREQ;
+			  int inum = (int) CURR_FREQ;
+			  float fraction = num - (float) inum;
+			 	  
+			  sprintf(freqFmtStr[i],"%d%c%d", (int) inum,'.',(int) (fraction*100));
+			  printf("Testing signal frequency %s Hz ....... \r",freqFmtStr[i]);
+			  
 		  }
 		  else
 		  {
-			  printf("Testing signal frequency of %d seconds per sample .......\r",(int)(1.0/CURR_FREQ));
-		  }
+			  float num = (1.0/CURR_FREQ);
+			  int inum = (int) (1.0/CURR_FREQ);
+			  float fraction = num - (float) inum;
+			 
+			  sprintf(freqFmtStr[i],"%d%c%d", (int) inum,'.',(int) (fraction*100));
+			  printf("Testing signal frequency of %s seconds per sample ....... \r",freqFmtStr[i]);
+			  
+	     }
+		  
 		 //Initialise level:
 		 PORTD |= (1 << PORTD3);
 		 sig_level_high = true;
 
 		 //Set up timer for signal generation
-		 timer0_init();
+		 timer0_init(CURR_FREQ);
 		 start_timer0();
 		 uint32_t cnt = 0;
 
 		 //Set up sampling timer:
 		 fr_prescaler = 8; //Initialise prescaler for freq response analysis
-		 timer1_init();
+		 timer1_init(CURR_FREQ);
 		 start_timer1();
 		 uint32_t sampleCnt = 0;
 
@@ -1170,22 +837,19 @@ void freqResponse(void)
 			{
 				stop_timer0();
 				chg_val = false;
-				//printf("timer0_cnt: %lu\n",timer0_cnt);
-				//printf("Cnt: %d, changing level\n",cnt);
-
-
+				
 				timer0_cnt = 0;
 				if(sig_level_high)
 				{
 					sig_level_high = false;
 					PORTD &= ~(1 << PORTD3);
-					//printf("Switching off\n");
+					
 				}
 				else
 				{
 					sig_level_high = true;
 					PORTD |= (1 << PORTD3);
-					//printf("Switching on\n");
+					
 				}
 				cnt = cnt + 1;
 				if(cnt == max_cnt)
@@ -1209,14 +873,13 @@ void freqResponse(void)
 				stop_timer1();
 				sample  = false;
 				dataBuf[sampleCnt] = readAnalogIn(1);
-				//printf("Have caught interrupt\n");
-
+				
 				Vavg[i] += dataBuf[sampleCnt];
 				if(sampleCnt < SAMPLE_BUF_LEN - 1)
 				{
 					start_timer1();
 					sampleCnt = sampleCnt + 1;
-					//printf("Sample count: %d\n",sampleCnt);
+					
 				}
 				else
 				{
@@ -1233,32 +896,28 @@ void freqResponse(void)
 
  	 }//for
 
-	//Save to data array
-
+	
 
 	//At end of test push results to externals PC via UART
 
-	char valStr[10],freqStr[10],cntStr[10];
-	for(int i=0;i< NUM;i++)
+	char valStr[10],cntStr[10];
+	for(int i=0;i< NUM_SAMPLES;i++)
  	{
  		//printf("%lu\r",Vavg[i]); //Need /r for line feed for serial port program
-
- 		if(SIG_FREQS[i] < 1)
+		if(SIG_FREQS[i] < 1.0)
  		{
  			sprintf(valStr,"%lu",Vavg[i]);
  			sprintf(cntStr,"%d",(int) samCnt[i]);
- 			sprintf(freqStr,"%d",(int)(1.0/SIG_FREQS[i]));
- 			printf("%s %s %s %s\r","<1Hz",cntStr,freqStr,valStr);
+ 			//sprintf(freqStr,"%d",(int)(1.0/SIG_FREQS[i]));
+ 			printf("%s %s %s %s\r","<1Hz",cntStr,freqFmtStr[i],valStr);
  		}
  		else
  		{
  			sprintf(valStr,"%lu",Vavg[i]);
  			sprintf(cntStr,"%d",(int) samCnt[i]);
- 			sprintf(freqStr,"%d",(int)SIG_FREQS[i]);
- 			printf("%s %s %s %s\r",">1Hz",cntStr,freqStr,valStr);
+ 			//sprintf(freqStr,"%d",(int)SIG_FREQS[i]);
+ 			printf("%s %s %s %s\r",">1Hz",cntStr,freqFmtStr[i],valStr);
  		}
-
-
 
 
  	}
