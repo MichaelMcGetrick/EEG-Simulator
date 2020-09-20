@@ -63,7 +63,7 @@
  *	SS			PB2					10
  *	MOSI		PB3					11
  *	MISO		PB4					12
- *	SCK			PB5					13
+ *	SCK		PB5					13
  *
  *
  *
@@ -125,6 +125,7 @@
 #define SPI_CTRL_CFG (RD_MODE << 7) | (INPUT_CHAN << 4)
 
 
+
 //FUNCTION DECLARATIONS: --------------------------
 
 //SPI
@@ -156,7 +157,6 @@ char cf_msb, cf_lsb;
 //SPI ATTRIBUTES:
 uint8_t SPI_MSB, SPI_LSB;
 uint8_t SPIData[ARRAY_LEN];
-//uint8_t dataBuf[BYTES_PER_SAMPLE*SAMPLE_BUF_LEN]; //Accommodate 4 bytes per sample
 int sampleCnt = 0;
 int byteCnt = 0;
 char data[5];
@@ -189,7 +189,7 @@ int main (void)
 	 ioinit(); //Setup IO pins and defaults
 
 	 bool baudtest = false;
-	 freq_response = true;
+	 freq_response = false;
 	 //Test for Baud rate ----------------------------------------------------
 	 if(baudtest)
 	 {
@@ -199,6 +199,7 @@ int main (void)
 	 //Do frequency response test---------------------------------------------
 	 	 if(freq_response)
 	 	 {
+	 		 _delay_ms(2000);
 	 		 freqResponse();
 
 	 	 }//if(baudtest)
@@ -250,20 +251,13 @@ int main (void)
 			 }
 			 else
 			 {
-				 // set pin 7 high to turn led on
-				 //PORTD |= (1 << PORTD7);
-
+				 
 				 sample = false;
 				 stop_timer1();
 				 //printf("Have caught flag change\n");
 
 				 //Read value:
-
 				 SPI_ReadMPC3008();
-
-
-				 //dataBuf[sampleCnt] = getVal(SPI_MSB,SPI_LSB);
-				 //dataBuf[sampleCnt] = readAnalogIn(0);
 
 
 				 itoa(getVal(SPI_MSB,SPI_LSB),data,10);
@@ -325,9 +319,6 @@ void simulation(void)
 			 cf_lsb = 'n';
 			 SPI_MSB = checkByte(SPI_MSB,0);
 			 SPI_LSB = checkByte(SPI_LSB,1);
-
-			 //uint16_t volts =  getVal(SPI_MSB,SPI_LSB);
-			 //printf("cf_msb: %c cf_lsb: %c Voltage: %d\n", cf_msb,cf_lsb,volts);
 
 
 			 USART_Transmit(cf_msb);
@@ -493,9 +484,7 @@ void SPI_Transmit( int8_t data )
 	{
 		//Wait for sent data
 	}
-	//Switch off light to show we got here
-	//PORTD &= ~(1 << PORTD7);
-
+	
 
 }//SPI_Transmit
 
@@ -729,25 +718,33 @@ void freqResponse(void)
 
 
 	//Define test frequencies:
-	int NUM = 23;
+	/*		
+	int NUM_SAMPLES = 13;
 	float SIG_FREQS[] =
 	{
-		0.01,0.05,0.1,0.2,0.4,0.5,0.8,
-		1,2,4,5,8,10,
-		20,40,50,80,100,
-		200,400,500,800,1000
+		0.01, 0.05, 0.1, 0.2, 0.4, 0.5, 0.8,
+		1.0, 2.0, 4.0, 5.0, 8.0, 10.0
+		
 	};
+	*/
+	
+	int NUM_SAMPLES = 10;  
+	float SIG_FREQS[] =
+	{
+		20.0, 40.0, 50.0, 80.0, 100.0, 200.0,
+		400.0, 500.0, 800.0, 1000.0
+	};
+	
+		
+	char freqFmtStr[NUM_SAMPLES][10];
 
-	uint32_t Vavg[NUM];  //Average value of signal (averaging over all positive values)
-	uint32_t samCnt[NUM];  //Sample count for each signal
+	uint32_t Vavg[NUM_SAMPLES];  //Average value of signal (averaging over all positive values)
+	uint32_t samCnt[NUM_SAMPLES];  //Sample count for each signal
 
 
 	//Define time (in seconds) to generate each signal
 	uint32_t NUM_SECS = 1*30;
 
-
-
-	//printf("Setting up for frequency response auto-testing...\n");
 
 
 	//Set up output port for test signal (square wave)
@@ -768,17 +765,20 @@ void freqResponse(void)
 	 PORTD &= ~(1 << PORTD3);
 	  //-------------------------------------------------------------------------
 
- 	 //NUM = 5; //temp
  	 //Send number of datasets, sample count and reference voltage
  	 char numStr[10],refStr[10];
- 	 sprintf(numStr,"%d",NUM);
+ 	 sprintf(numStr,"%d",NUM_SAMPLES);
  	 sprintf(refStr,"%d",(int) Vref);
+    
 
- 	 //Send vi UART:
+ 	 //Send via UART:
  	 printf("%s %s\r",numStr,refStr);
-	 
- 	 for(int i=0;i<NUM;i++)
+ 	 
+ 	 
+ 	 
+ 	 for(int i=0;i<NUM_SAMPLES;i++)
  	 {
+		 	 
  		 if(SIG_FREQS[i] == 0.01)   //Ensure we keep signal for entire cycle
  		 {
  			 NUM_SECS = 1*100;
@@ -788,19 +788,32 @@ void freqResponse(void)
  		 {
  			 NUM_SECS = 1*30;
  		 }
+       
 
 		 //Start sampling:
 		  CURR_FREQ = SIG_FREQS[i]; //Initialise signal frequency
 		  Vavg[i] = 0.0;
-
 		  if(CURR_FREQ >= 1.0)
 		  {
-			  printf("Testing signal frequency %d Hz .......\r",(int)CURR_FREQ);
+			  float num = CURR_FREQ;
+			  int inum = (int) CURR_FREQ;
+			  float fraction = num - (float) inum;
+			 	  
+			  sprintf(freqFmtStr[i],"%d%c%d", (int) inum,'.',(int) (fraction*100));
+			  printf("Testing signal frequency %s Hz ....... \r",freqFmtStr[i]);
+			  
 		  }
 		  else
 		  {
-			  printf("Testing signal frequency of %d seconds per sample .......\r",(int)(1.0/CURR_FREQ));
-		  }
+			  float num = (1.0/CURR_FREQ);
+			  int inum = (int) (1.0/CURR_FREQ);
+			  float fraction = num - (float) inum;
+			 
+			  sprintf(freqFmtStr[i],"%d%c%d", (int) inum,'.',(int) (fraction*100));
+			  printf("Testing signal frequency of %s seconds per sample ....... \r",freqFmtStr[i]);
+			  
+	     }
+		  
 		 //Initialise level:
 		 PORTD |= (1 << PORTD3);
 		 sig_level_high = true;
@@ -824,22 +837,19 @@ void freqResponse(void)
 			{
 				stop_timer0();
 				chg_val = false;
-				//printf("timer0_cnt: %lu\n",timer0_cnt);
-				//printf("Cnt: %d, changing level\n",cnt);
-
-
+				
 				timer0_cnt = 0;
 				if(sig_level_high)
 				{
 					sig_level_high = false;
 					PORTD &= ~(1 << PORTD3);
-					//printf("Switching off\n");
+					
 				}
 				else
 				{
 					sig_level_high = true;
 					PORTD |= (1 << PORTD3);
-					//printf("Switching on\n");
+					
 				}
 				cnt = cnt + 1;
 				if(cnt == max_cnt)
@@ -863,14 +873,13 @@ void freqResponse(void)
 				stop_timer1();
 				sample  = false;
 				dataBuf[sampleCnt] = readAnalogIn(1);
-				//printf("Have caught interrupt\n");
-
+				
 				Vavg[i] += dataBuf[sampleCnt];
 				if(sampleCnt < SAMPLE_BUF_LEN - 1)
 				{
 					start_timer1();
 					sampleCnt = sampleCnt + 1;
-					//printf("Sample count: %d\n",sampleCnt);
+					
 				}
 				else
 				{
@@ -887,32 +896,28 @@ void freqResponse(void)
 
  	 }//for
 
-	//Save to data array
-
+	
 
 	//At end of test push results to externals PC via UART
 
-	char valStr[10],freqStr[10],cntStr[10];
-	for(int i=0;i< NUM;i++)
+	char valStr[10],cntStr[10];
+	for(int i=0;i< NUM_SAMPLES;i++)
  	{
  		//printf("%lu\r",Vavg[i]); //Need /r for line feed for serial port program
-
- 		if(SIG_FREQS[i] < 1)
+		if(SIG_FREQS[i] < 1.0)
  		{
  			sprintf(valStr,"%lu",Vavg[i]);
  			sprintf(cntStr,"%d",(int) samCnt[i]);
- 			sprintf(freqStr,"%d",(int)(1.0/SIG_FREQS[i]));
- 			printf("%s %s %s %s\r","<1Hz",cntStr,freqStr,valStr);
+ 			//sprintf(freqStr,"%d",(int)(1.0/SIG_FREQS[i]));
+ 			printf("%s %s %s %s\r","<1Hz",cntStr,freqFmtStr[i],valStr);
  		}
  		else
  		{
  			sprintf(valStr,"%lu",Vavg[i]);
  			sprintf(cntStr,"%d",(int) samCnt[i]);
- 			sprintf(freqStr,"%d",(int)SIG_FREQS[i]);
- 			printf("%s %s %s %s\r",">1Hz",cntStr,freqStr,valStr);
+ 			//sprintf(freqStr,"%d",(int)SIG_FREQS[i]);
+ 			printf("%s %s %s %s\r",">1Hz",cntStr,freqFmtStr[i],valStr);
  		}
-
-
 
 
  	}
