@@ -39,10 +39,7 @@
  *
  *  Miscellaneous
  *  -------------
- *  Add facility to perform auto testing of the frequency response of the
- *  HPF (high pass filter) sub-circuit. The results will be sent by UART
- *  to  external processing for processing and creating a frequency response graphics
- *
+ *  
  *  Use of floating point numbers:
  *  We need to add the following linker options:
  *  General
@@ -117,12 +114,13 @@
 
 
 //SPI Comms configuration:
-#define START_BIT	1
+#define START_BIT			1
 //MPC3008
-#define RD_MODE 	  1   //Single:1; Differential: 0
-#define INPUT_CHAN    0 //7   //Analog input channel index
-#define ARRAY_LEN	  3	//Array length for incoming data
-#define SPI_CTRL_CFG (RD_MODE << 7) | (INPUT_CHAN << 4)
+#define RD_MODE 	  		1   //Single:1; Differential: 0
+#define INPUT_CHAN    	0 //7   //Analog input channel index
+#define ARRAY_LEN	  		3	//Array length for incoming data
+#define SPI_CTRL_CFG 	(RD_MODE << 7) | (INPUT_CHAN << 4)
+#define SPI_CLK_FREQ		1 //MHz: Highest Options: 1MHz or 2MHz (4MHz above 3.6MHz maximum rating for MCP3008)
 
 
 
@@ -148,6 +146,7 @@ uint16_t getVal(uint8_t msb,uint8_t lsb);
 //Diagnostics:
 void doBaudTest(void);
 void freqResponse(void);
+void doMetricTest(void);
 
 //-------------------------------------------------
 
@@ -189,11 +188,16 @@ int main (void)
 	 ioinit(); //Setup IO pins and defaults
 
 	 bool baudtest = false;
-	 freq_response = true;
+	 freq_response = false;
 	 //Test for Baud rate ----------------------------------------------------
 	 if(baudtest)
 	 {
 		 doBaudTest();
+
+	 }//if(baudtest)
+	 if(PROGRAM_MODE == METRIC_TEST)	//N.B.: PROGRAM_MODE defined in Timer1.h
+	 {
+		 doMetricTest();
 
 	 }//if(baudtest)
 	 //Do frequency response test---------------------------------------------
@@ -449,7 +453,18 @@ void SPI_MasterInit()
 	SPCR |= (1 << MSTR);
 	//Define Clock frequency
 	//NB: MPC3008 has max.clock frequency of 3.6MHz for 5V supply (see datasheet)
-	SPCR |= (1 << SPR0); //Prescaler fosc/16 (1MHz)
+	if(SPI_CLK_FREQ == 1)
+	{
+		SPCR |= (1 << SPR0); //Prescaler fosc/16 (1MHz)
+	}
+	if(SPI_CLK_FREQ == 2)
+	{
+		//Prescaler fosc/8 (1MHz)
+		SPCR |= (1 << SPR0);
+		SPSR |= (1 << SPI2X); //Bit to double the clock speed 
+	}
+	
+	
 	//Define Clock Polarity and phase
 	//Mode (0,0): CPOL =0; CPHA =0; (Already set to zero)
 	// This mode used when CLK is 0 for idle
@@ -519,7 +534,7 @@ void SPI_ReadMPC3008()
 
 
 
-}//SPI_Read
+}//SPI_ReadMCP3008
 
 
 void adc_init(void)
@@ -931,3 +946,43 @@ void freqResponse(void)
 	exit(0);
 
 }////freqResponse
+
+
+void doMetricTest(void)
+{
+	printf("Performing metric test on MCP3008....\n");
+	
+	
+	 //set pin 7 high to turn led on
+	 PORTD |= (1 << PORTD7);
+	
+	 //Set up for SPI communications
+	 SPI_MasterInit();
+	 printf("Setting up for MPC3008 input\n");
+ 
+	
+	//Initialise timer 
+	timer1_init(0.0f); //Supply dummy frequency
+	
+	//Start test:
+	uint32_t max_cnt = 100;
+	start_timer1();
+	for(int i=0;i<max_cnt;i++)
+	{
+		SPI_ReadMPC3008();
+	}	
+	stop_timer1();
+	
+	printf("timer_cnt: %u\n",timer_cnt);
+	printf("Sample period: %u us\n",timer_cnt/(2*max_cnt));
+		
+	
+	//set pin 7 low to turn led off
+   PORTD &= ~(1 << PORTD7);
+	
+	printf("Exiting program!\n");
+
+	exit(0);
+	
+	
+}//doMetricTest	
