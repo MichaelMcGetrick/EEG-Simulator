@@ -39,10 +39,16 @@ void SPI_MasterInit()
 	}
 	if(SPI_CLK_FREQ == 2)
 	{
-		//Prescaler fosc/8 (1MHz)
 		SPCR |= (1 << SPR0);
 		SPSR |= (1 << SPI2X); //Bit to double the clock speed 
 	}
+	if(SPI_CLK_FREQ == 3)
+	{
+		//Set for 0.5MHz
+		SPCR |= (1 << SPR1);
+		SPSR |= (1 << SPI2X); //Bit to double the clock speed 
+	}
+	
 	
 	
 	//Define Clock Polarity and phase
@@ -79,7 +85,7 @@ void SPI_Transmit( int8_t data )
 	{
 		//Wait for sent data
 	}
-	
+		
 
 }//SPI_Transmit
 

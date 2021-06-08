@@ -20,15 +20,14 @@
 
 //DEFINES HERE ------------------------------------------------------------------------------------
 #define FOSC 16000000    				//CPU clock frequency
-#define SAMPLE_RATE			1000 //1000   //(samples per sec)
+#define SAMPLE_RATE			20000 //1000   //(samples per sec)
 #define PRESCALER				8  //64  //1024: Sample rate = 0; Others: USe Timer1_Calcs.xls table
-#define PRESCALER_METRICS	8//1024
-#define SECS_PER_SAMPLE		1
+#define PRESCALER_METRICS	1024//1024
+#define SECS_PER_SAMPLE		5
 
 //Defines for conditional compilation: 
-#define	REGULAR				0
-#define	METRIC_TEST			1
-#define PROGRAM_MODE			REGULAR	//METRIC_TEST				
+#define	REGULAR								0
+#define PROGRAM_MODE							REGULAR //METRIC_TEST_NORMAL //REGULAR				
 
 
 //FUNCTION DECLARATIONS HERE -----------------------------------------------------------------------
