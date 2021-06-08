@@ -75,6 +75,7 @@
 #include <avr/interrupt.h>
 #include <util/delay.h>
 #include <stdlib.h>
+#include <time.h>
 #include <stdbool.h>
 #include <math.h>			//NB: Need to add m library in Library section
 
@@ -83,6 +84,8 @@
 #include "Timer0.h"		
 #include "Timer1.h"
 #include "spi.h"
+#include "i2c.h"
+
 
 //DEFINES: ------------------------
 #define BLINK_DELAY_MS 100
@@ -102,6 +105,14 @@
 #define INPUT_CHAN    	0 //7   //Analog input channel index
 #define ARRAY_LEN	  		3	//Array length for incoming data
 #define SPI_CTRL_CFG 	(RD_MODE << 7) | (INPUT_CHAN << 4)
+
+#define SAMPLE_MODE		1  //0: Normal; 1: sampling metrics
+
+
+//I2C RTC (DS3231) defines:
+#define SLAVE_ADDR 0x68        
+//RTC register addresses:
+#define RTC_SECOND 0x00
 
 
 
@@ -123,7 +134,10 @@ uint16_t getVal(uint8_t msb,uint8_t lsb);
 //Diagnostics:
 void doBaudTest(void);
 void freqResponse(void);
-void doMetricTest(void);
+void doMetricTest_FastLoop(void);
+void doMetricTest_Normal(void);
+uint32_t getHMSTimestamp();
+
 
 //-------------------------------------------------
 
@@ -138,8 +152,10 @@ int byteCnt = 0;
 char data[5];
 uint16_t dataBuf[SAMPLE_BUF_LEN];
 
-int32_t cnt;
+int32_t cnt,maxCnt;
 bool m_bSimulation	= false;
+bool m_bSamplingMetrics = true;
+bool m_bSamplingMetrics_Fastloop = false;
 char* AnaInpDev = "MPC3008"; //MPC3008;ADC PIN
 
 //Frequency response attributes:
@@ -148,6 +164,12 @@ bool sig_level_high;
 
 //Time diagnostics
 long t_s, t;
+
+//RTC attributes:
+uint8_t digit1, digit2;
+uint8_t mask = 0xf;
+char retStr[5];
+
 
 
 int main (void)
@@ -172,11 +194,25 @@ int main (void)
 		 doBaudTest();
 
 	 }//if(baudtest)
-	 if(PROGRAM_MODE == METRIC_TEST)	//N.B.: PROGRAM_MODE defined in Timer1.h
+	 if(m_bSamplingMetrics_Fastloop)
 	 {
-		 doMetricTest();
+		 //Initialise I2C for RTC
+		 i2c_init();
+		 
+		 doMetricTest_FastLoop();
 
-	 }//if(baudtest)
+	 }//if
+	 if(m_bSamplingMetrics)	
+	 {
+		 //Initialise I2C for RTC
+		 i2c_init();
+		 
+		 //doMetricTest_Normal();
+		 doMetricTest_Normal();
+
+	 }//if
+	 
+	 
 	 //Do frequency response test---------------------------------------------
 	 	 if(freq_response)
 	 	 {
@@ -194,7 +230,8 @@ int main (void)
 	 }//if(m_bSimulation)
 	 else
 	 {
-
+		 
+		 
          //Normal sampling for transfer to external PC via UART
 		 if( strcmp(AnaInpDev,"ADCPIN") == 0)
 		 {
@@ -218,9 +255,17 @@ int main (void)
 		 timer1_init(0.0); //Provide dummy signal frequency
 
 		 cnt = 0;
+		 maxCnt = 10;
 
 
 		 //printf("Starting timer..\n");
+		 //Get timestamp1
+		 
+		 //start_t = clock();
+		 
+		 
+       
+      
 		 start_timer1();
 		 while(1)
 		 {
@@ -237,6 +282,7 @@ int main (void)
 				 stop_timer1();
 				 //printf("Have caught flag change\n");
 
+              
 				 //Read value:
 				 SPI_ReadMPC3008();
 
@@ -244,18 +290,24 @@ int main (void)
 				 itoa(getVal(SPI_MSB,SPI_LSB),data,10);
 				 printf("%s\r",data); //Need /r for line feed for serial port program
 
-				 
-				 //Start timer:
-				start_timer1();
+              			
+              cnt++;				 
+		  	   //Start timer:
+     	 		 start_timer1();
+     	 		 
 
 			 }
 
 
 		 }//while
+		 //get timestamp 2
+		 //Send data to UART
+		 
+		 		 		 
 
 	 }//if(!m_bSimulation
 
-     //printf("Am out of while - just before program end!\n");
+     printf("Am out of while - just before program end!\n");
 	 return 0;
 
 }//main
@@ -857,41 +909,189 @@ void freqResponse(void)
 }////freqResponse
 
 
-void doMetricTest(void)
+void doMetricTest_Normal(void)
 {
-	printf("Performing metric test on MCP3008....\n");
+
+	 uint32_t ts_st,ts_end,time_diff;
+	 uint32_t MAX_CNT;
+	 
+
+    printf("Doing NORMAL Sampling Metric Test ...\n");
+    
+	 //Set up for SPI communications
+	 SPI_MasterInit();
+	  
+
+	int numSamples = 1; //16;
+	float sample_rates[] = {1.0f,10.0f,50.0f,100.0f,200.0f,250.0f,
+		                     500.0f,1000.0f,1250.0f,2000.0f,4000.0f, 
+		                     5000.0f,8000.0f,10000.0f,16000.0f,20000.0f};
+	//NB: Above sampling frequencies give integral counts for timer after prescaling 
+   //    The correct prescaler value must be set for each sampling frequency
+   
+   //Start test:
+	uint32_t TIME_INT = 60*3; //Time interval for sampling (secs) 
+	MAX_CNT = sample_rates[15]*TIME_INT;
+   cnt = 0;
+
+	 // set pin 7 high to turn led on
+	 PORTD |= (1 << PORTD7);
+
+
+	 //Initialise timer:
+	 timer1_init(0.0); //Provide dummy signal frequency
+	 	 
+   
+	SPI_MasterInit();  //Need to do twice (check why?)
 	
+	
+	 
+	 ts_st = getHMSTimestamp();
+	 start_timer1();
+	 while(cnt < MAX_CNT)
+	 {
+
+       if(!sample)
+		 {
+			 //Wait until flagged to sample
+			 //printf("Waiting for flag change\n");
+		 }
+		 else
+		 {
+			 
+			 sample = false;
+			 stop_timer1();
+			 //printf("Have caught flag change\n");
+			  
+			 //Read value:
+			 SPI_ReadMPC3008();
+
+			 //itoa(getVal(SPI_MSB,SPI_LSB),data,10);
+			 //printf("%s\n",data); //Need /r for line feed for serial port program
+						
+			  cnt++;				 
+			//Start timer:
+			 start_timer1();
+			 
+		 }
+
+	 }//while
+	 //get timestamp 2
+	 stop_timer1();
+	 ts_end = getHMSTimestamp();
+	 
+	 time_diff = ts_end - ts_st;
+	
+    printf("Time difference for loop (secs):  %lu\n",time_diff);
+	 printf("Max count: %lu\n",MAX_CNT);
+	 uint32_t eff_rate = (MAX_CNT/time_diff);
+	 printf("Effective sampling rate:  %lu (Hz)\n",eff_rate) ; //to nearest 1Hz
+	 
+	
+	//set pin 7 low to turn led off
+   PORTD &= ~(1 << PORTD7);
+	
+	printf("Exiting NORMAL Sampling Metric test ...\n");
+
+	exit(0);
+    
+    
+
+}//doMetricTest_Normal
+
+
+void doMetricTest_FastLoop(void)
+{
+	 uint32_t ts_st,ts_end,time_diff;
+	 uint32_t MAX_CNT;
+	 
+	 printf("Performing FASTLOOP metric test on MCP3008....\n");
+	 
 	
 	 //set pin 7 high to turn led on
 	 PORTD |= (1 << PORTD7);
+		 
+ 	
+ 	//Start test:
+	MAX_CNT = 1*1000000; //1000000; //Fast loop mode
 	
-	 //Set up for SPI communications
-	 SPI_MasterInit();
-	 printf("Setting up for MPC3008 input\n");
- 
+ 	//Set up for SPI communications
+	SPI_MasterInit();
+	 		
+	ts_st = getHMSTimestamp();
+	SPI_MasterInit();  //Need to do twice (check why?)
 	
-	//Initialise timer 
-	timer1_init(0.0f); //Supply dummy frequency
-	
-	//Start test:
-	uint32_t max_cnt = 100;
-	start_timer1();
-	for(int i=0;i<max_cnt;i++)
+	for(uint32_t i=0;i<MAX_CNT;i++)
 	{
 		SPI_ReadMPC3008();
+		
 	}	
-	stop_timer1();
+	 
+	ts_end = getHMSTimestamp();
+	time_diff = ts_end - ts_st;
 	
-	printf("timer_cnt: %u\n",timer_cnt);
-	printf("Sample period: %u us\n",timer_cnt/(2*max_cnt));
+	printf("Time difference for loop (secs):  %lu\n",time_diff);
+	printf("Max count: %lu\n",MAX_CNT);
+	//printf("Time difference per sample (secs):  %f\n",(float)time_diff/(float)MAX_CNT);
+	uint32_t eff_rate = (MAX_CNT/time_diff);
+	printf("Effective sampling rate:  %lu\n",eff_rate) ;
+	
 		
 	
 	//set pin 7 low to turn led off
    PORTD &= ~(1 << PORTD7);
 	
-	printf("Exiting program!\n");
+	printf("Exiting Fastloop Sampling Metric test ...\n");
 
 	exit(0);
 	
 	
-}//doMetricTest	
+}//doMetricTest_FastLoop	
+
+
+uint32_t getHMSTimestamp()
+{
+	//Get total timestamp in seconds for Hrs/Min/Sec:
+	char numStr[3];
+	
+	uint32_t ts_hr,ts_min,ts_sec;
+	
+	uint8_t nBytes = 3;  //Hrs/Min/Sec
+	if( i2c_readbyte(SLAVE_ADDR,RTC_SECOND,nBytes) == -1 )
+	{
+		printf("\r\nThere was a problem reading from the DS3231 register.");
+	}
+	
+	//Get secs from hrs
+	//Get first digit:
+	digit1 = dataBuffer[2] >> 4;
+	//Get second digit:
+	digit2 = dataBuffer[2] & mask;
+   sprintf(numStr,"%d%d",digit1,digit2);
+	ts_hr =  60*60*((uint32_t)atoi(numStr));
+	//ts_hr =  atoi(numStr);
+	
+		
+	//Get secs from mins
+	//Get first digit:
+	digit1 = dataBuffer[1] >> 4;
+	//Get second digit:
+	digit2 = dataBuffer[1] & mask;
+   sprintf(numStr,"%d%d",digit1,digit2);
+	ts_min =  60*((uint32_t)atoi(numStr));
+	
+	//Get first digit:
+	digit1 = dataBuffer[0] >> 4;
+	//Get second digit:
+	digit2 = dataBuffer[0] & mask;
+   sprintf(numStr,"%d%d",digit1,digit2);
+	ts_sec =  (uint32_t) atoi(numStr);
+	
+		
+	return ts_hr+ts_min+ts_sec;
+		
+			
+}//getHMSTimestamp	
+
+
+

@@ -39,8 +39,8 @@
 #define SPI_SLAVE_SELECTED SPI_SS_PORT &= ~(1 << SPI_SS_GPIO)
 #define SPI_SLAVE_DESELECTED SPI_SS_PORT |= (1 << SPI_SS_GPIO)
 
-#define SPI_CLK_FREQ		1 //MHz: Highest Options: 1MHz or 2MHz (4MHz above 3.6MHz maximum rating for MCP3008)
-
+#define SPI_CLK_FREQ		3 //MHz: Highest Options: 1MHz or 2MHz (4MHz above 3.6MHz maximum rating for MCP3008)
+									//1: 1MHz; 2: 2MHz; 3: 0.5MHz
 
 
 
